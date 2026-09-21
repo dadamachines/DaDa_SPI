@@ -23,6 +23,9 @@ Include the library in your Arduino sketch:
 
 Refer to the `examples/` directory for sample code and usage patterns.
 
+## Bounded handshake wait
+`WaitUntilP4IsReady()` spins while the peer holds the handshake pin low. A peer that resets holds it low for its whole boot, so a transfer started just before the reset blocks the caller for that boot time and then clocks against the fresh peer. `SetPeerAlivePredicate(alive, ctx)` installs a liveness source the caller already has (for example a second link the peer answers every few milliseconds): while the handshake is low the wait ends as soon as the predicate reports the peer dead, `WaitUntilP4IsReady()` returns `false`, and `TransferBlocking`/`TransferBlockingDelayed` clock nothing, zero `rx_buf` and return `false`. Without a predicate every wait is unbounded, as before.
+
 ## Documentation
 - **API Reference:** See `DaDa_SPI.h` for available functions and usage.
 - **Examples:** The `examples/` folder contains sample sketches demonstrating typical use cases.

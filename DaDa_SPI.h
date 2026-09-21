@@ -5,6 +5,7 @@
 #include <hardware/gpio.h>
 #include <hardware/spi.h>
 #include <Arduino.h>
+#include <string.h>
 
 class DaDa_SPI {
     public:
@@ -52,28 +53,51 @@ class DaDa_SPI {
         void WaitUntilDMADoneBlocking(){
             while(IsBusy()) tight_loop_contents();
         }
-        void WaitUntilP4IsReady(){
-            while(!gpio_get(_handshake_pin)) tight_loop_contents();
+        // A peer that resets holds the handshake low for its whole boot; without a
+        // liveness predicate the wait is unbounded, with one it ends (false) as soon
+        // as the predicate reports the peer dead while the handshake is low.
+        typedef bool (*PeerAlivePredicate)(void* ctx);
+        void SetPeerAlivePredicate(PeerAlivePredicate alive, void* ctx){
+            _peer_alive = alive;
+            _peer_alive_ctx = ctx;
+        }
+        bool WaitUntilP4IsReady(){
+            bool alive = PeerAlive();
+            while(!gpio_get(_handshake_pin)){
+                if(!alive) return false;
+                tight_loop_contents();
+                alive = PeerAlive();
+            }
+            return true;
         }
         bool GetP4Ready(){
             return gpio_get(_handshake_pin);
         }
-        void TransferBlocking(uint8_t* tx_buf, uint8_t* rx_buf, uint len){
+        // false = the peer died under the wait: nothing was clocked and rx_buf is zeroed.
+        bool TransferBlocking(uint8_t* tx_buf, uint8_t* rx_buf, uint len){
             WaitUntilDMADoneBlocking(); // wait until previous transfer is done
-            WaitUntilP4IsReady(); // wait until p4 is ready
+            if(!WaitUntilP4IsReady()){
+                memset(rx_buf, 0, len);
+                return false;
+            }
             StartDMA(tx_buf, rx_buf, len); // start DMA transfer
             WaitUntilDMADoneBlocking(); // wait until transfer is done
+            return true;
         }
-        void TransferBlockingDelayed(uint8_t* tx_buf, uint8_t* rx_buf, uint len, uint delay_us=15){
+        bool TransferBlockingDelayed(uint8_t* tx_buf, uint8_t* rx_buf, uint len, uint delay_us=15){
             WaitUntilDMADoneBlocking(); // wait until previous transfer is done
             // delay here works
             // if (delay_us > 0) busy_wait_us_32(delay_us);
-            WaitUntilP4IsReady();
+            if(!WaitUntilP4IsReady()){
+                memset(rx_buf, 0, len);
+                return false;
+            }
             // delay here fails
             StartDMA(tx_buf, rx_buf, len); // start DMA transfer
             WaitUntilDMADoneBlocking(); // wait until transfer is done
             // delay here works
             if (delay_us > 0) busy_wait_us_32(delay_us);
+            return true;
         }
         void StartDMA(uint8_t* tx_buf, uint8_t* rx_buf, uint len){
             // configure DMA
@@ -93,7 +117,12 @@ class DaDa_SPI {
             dma_start_channel_mask((1u << dma_tx_spi) | (1u << dma_rx_spi));
         }
 private:
+    bool PeerAlive(){
+        return _peer_alive == nullptr || _peer_alive(_peer_alive_ctx);
+    }
     spi_inst_t * _spi_port {nullptr};
+    PeerAlivePredicate _peer_alive {nullptr};
+    void* _peer_alive_ctx {nullptr};
     uint _spi_cs, _spi_mosi, _spi_miso, _spi_sclk, _spi_speed, _handshake_pin;
     uint dma_tx_spi;
     uint dma_rx_spi;
