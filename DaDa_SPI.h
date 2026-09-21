@@ -61,7 +61,7 @@ class DaDa_SPI {
             _peer_alive = alive;
             _peer_alive_ctx = ctx;
         }
-        bool WaitUntilP4IsReady(){
+        __noinline bool WaitUntilP4IsReady(){
             bool alive = PeerAlive();
             while(!gpio_get(_handshake_pin)){
                 if(!alive) return false;
@@ -74,7 +74,8 @@ class DaDa_SPI {
             return gpio_get(_handshake_pin);
         }
         // false = the peer died under the wait: nothing was clocked and rx_buf is zeroed.
-        bool TransferBlocking(uint8_t* tx_buf, uint8_t* rx_buf, uint len){
+        // The blocking calls last a whole frame; inlining them only multiplies their code.
+        __noinline bool TransferBlocking(uint8_t* tx_buf, uint8_t* rx_buf, uint len){
             WaitUntilDMADoneBlocking(); // wait until previous transfer is done
             if(!WaitUntilP4IsReady()){
                 memset(rx_buf, 0, len);
@@ -84,7 +85,7 @@ class DaDa_SPI {
             WaitUntilDMADoneBlocking(); // wait until transfer is done
             return true;
         }
-        bool TransferBlockingDelayed(uint8_t* tx_buf, uint8_t* rx_buf, uint len, uint delay_us=15){
+        __noinline bool TransferBlockingDelayed(uint8_t* tx_buf, uint8_t* rx_buf, uint len, uint delay_us=15){
             WaitUntilDMADoneBlocking(); // wait until previous transfer is done
             // delay here works
             // if (delay_us > 0) busy_wait_us_32(delay_us);
